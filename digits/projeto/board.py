@@ -1,83 +1,49 @@
-# Import MNIST data
-import input_data
-mnist = input_data.read_data_sets("..\\digits", one_hot=True)
 
-import tensorflow as tf
 
-# Set parameters
-learning_rate = 0.01
-training_iteration = 30
-batch_size = 100
-display_step = 2
-#num_steps = 1000
 
-# TF graph input
-x = tf.placeholder("float", [None, 784]) # mnist data image of shape 28*28=784
-y = tf.placeholder("float", [None, 10]) # 0-9 digits recognition => 10 classes
+from __future__ import division, print_function, absolute_import
 
-# Create a model
+import tflearn
+from tflearn.layers.core import input_data, dropout, fully_connected
+from tflearn.layers.conv import conv_2d, max_pool_2d
+from tflearn.layers.normalization import local_response_normalization
+from tflearn.layers.estimator import regression
 
-# Set model weights
-W = tf.Variable(tf.zeros([784, 10]))
-b = tf.Variable(tf.zeros([10]))
+# Data loading and preprocessing
+import tflearn.datasets.mnist as mnist
+X, Y, testX, testY = mnist.load_data("..\\digits",one_hot=True)
+X = X.reshape([-1, 28, 28, 1])
+testX = testX.reshape([-1, 28, 28, 1])
 
-with tf.name_scope("Wx_b") as scope:
-    # Construct a linear model
-    model = tf.nn.softmax(tf.matmul(x, W) + b) # Softmax
-    
-# Add summary ops to collect data
-w_h = tf.summary.histogram("weights", W)
-b_h = tf.summary.histogram("biases", b)
+# Building convolutional network
+network = input_data(shape=[None, 28, 28, 1], name='input')
+network = conv_2d(network, 32, 3, activation='relu', regularizer="L2")
+network = max_pool_2d(network, 2)
+network = local_response_normalization(network)
+network = conv_2d(network, 64, 3, activation='relu', regularizer="L2")
+network = max_pool_2d(network, 2)
+network = local_response_normalization(network)
+network = conv_2d(network, 96, 3, activation='relu', regularizer="L2")
+network = conv_2d(network, 96, 3, activation='relu', regularizer="L2")
+network = conv_2d(network, 64, 3, activation='relu', regularizer="L2")
+network = max_pool_2d(network, 2)
+network = local_response_normalization(network)
+network = fully_connected(network, 128, activation='tanh')
+network = dropout(network, 0.8)
+network = fully_connected(network, 256, activation='tanh')
+network = dropout(network, 0.8)
+network = fully_connected(network, 10, activation='softmax')
+network = regression(network, optimizer='adam', learning_rate=0.01,
+                     loss='categorical_crossentropy', name='target')
 
-# More name scopes will clean up graph representation
-with tf.name_scope("cost_function") as scope:
-    # Minimize error using cross entropy
-    # Cross entropy
-    cost_function = -tf.reduce_sum(y*tf.log(model))
-    # Create a summary to monitor the cost function
-    tf.summary.scalar("cost_function", cost_function)
+# Training
+model = tflearn.DNN(network, tensorboard_verbose=0, tensorboard_dir='../logs')
+model.fit({'input': X}, {'target': Y}, n_epoch=20,
+           validation_set=({'input': testX}, {'target': testY}),
+           snapshot_step=100, show_metric=True, run_id='convnet_mnist')
+model.save('modelo.tflearn')
 
-with tf.name_scope("train") as scope:
-    # Gradient descent
-    optimizer = tf.train.GradientDescentOptimizer(learning_rate).minimize(cost_function)
+model.load('./modelo.tflearn')
 
-# Initializing the variables
-init = tf.initialize_all_variables()
-
-# Merge all summaries into a single operator
-merged_summary_op = tf.summary.merge_all()
-
-# Launch the graph
-with tf.Session() as sess:
-    sess.run(init)
-
-    
-    
-    # Change this to a location on your computer
-    summary_writer = tf.summary.FileWriter('..\\logs', graph_def=sess.graph_def)
-
-    # Training cycle
-    for iteration in range(training_iteration):
-        avg_cost = 0.
-        total_batch = int(mnist.train.num_examples/batch_size)
-        # Loop over all batches
-        for i in range(total_batch):
-            batch_xs, batch_ys = mnist.train.next_batch(batch_size)
-            # Fit training using batch data
-            sess.run(optimizer, feed_dict={x: batch_xs, y: batch_ys})
-            # Compute the average loss
-            avg_cost += sess.run(cost_function, feed_dict={x: batch_xs, y: batch_ys})/total_batch
-            # Write logs for each iteration
-            summary_str = sess.run(merged_summary_op, feed_dict={x: batch_xs, y: batch_ys})
-            summary_writer.add_summary(summary_str, iteration*total_batch + i)
-        # Display logs per iteration step
-        if iteration % display_step == 0:
-            print("Iteration:", '%04d' % (iteration + 1), "cost=", "{:.9f}".format(avg_cost))
-
-    print("Tuning completed!")
-
-    # Test the model
-    predictions = tf.equal(tf.argmax(model, 1), tf.argmax(y, 1))
-    # Calculate accuracy
-    accuracy = tf.reduce_mean(tf.cast(predictions, "float"))
-    print("Accuracy:", accuracy.eval({x: mnist.test.images, y: mnist.test.labels}))
+print('================================')
+print(model.predict([testX[0],testX[1]]))
